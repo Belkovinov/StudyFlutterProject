@@ -1,61 +1,179 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
+import 'models/chat_models.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
+class ApiService {
+  final Dio dio = Dio(BaseOptions(
+    baseUrl: "https://gpt.yall.icu/v1",
+    connectTimeout: const Duration(seconds: 15),
+    receiveTimeout: const Duration(seconds: 30),
+  ));
+
+  Future<ChatCompletionResponse?> sendRequest(String userInput) async {
+    final request = ChatCompletionRequest(
+      model: "default",
+      messages: [ChatMessage(role: "user", content: userInput)],
+    );
+
+    try {
+      final response = await dio.post(
+        "/chat/completions",
+        data: request.toJson(),
+      );
+
+      if (response.statusCode == 200) {
+        return ChatCompletionResponse.fromJson(response.data);
+      } else {
+        debugPrint('Ошибка ответа сервера: ${response.statusCode}');
+        return null;
+      }
+    } on DioException catch (e) {
+      debugPrint('Исключение при запросе чата: $e');
+      if (e.response != null) {
+        debugPrint('Данные ошибки: ${e.response?.data}');
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Произошла непредвиденная ошибка: $e');
+      return null;
+    }
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Flutter AI Чат',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const ChatPage(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
-
+class ChatPage extends StatefulWidget {
+  const ChatPage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-  final controller = TextEditingController();
-  bool isPressed = false;
+class _ChatPageState extends State<ChatPage> {
+  final ApiService _apiService = ApiService();
+  final TextEditingController _textController = TextEditingController();
 
-  void _incrementCounter() {
+  String _responseText = "Здесь появится ответ от нейросети...";
+  bool _isLoading = false;
+
+  Future<void> _sendMessage() async {
+    final userInput = _textController.text;
+    if (userInput.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пожалуйста, введите ваш запрос.')),
+      );
+      return;
+    }
+
     setState(() {
-      _counter++;
+      _isLoading = true;
+      _responseText = "Отправка запроса...";
     });
+
+    final response = await _apiService.sendRequest(userInput);
+
+    setState(() {
+      if (response != null && response.choices.isNotEmpty) {
+        _responseText = response.choices.first.message.content.trim();
+      } else {
+        _responseText = "Не удалось получить ответ. Попробуйте еще раз.";
+      }
+      _isLoading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme
-            .of(context)
-            .colorScheme
-            .inversePrimary,
-        title: Text("Flutter Demo Home Page"),
+        title: const Text('Чат с AI'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-        body: Switch(
-            value: isPressed,
-            activeThumbColor:Colors.red,
-            onChanged: (bool value) {
-          setState((){
-            isPressed = value;
-          });
-        })
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                child: SingleChildScrollView(
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : Text(
+                      _responseText,
+                      style: const TextStyle(fontSize: 16.0, height: 1.5),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    decoration: InputDecoration(
+                      hintText: 'Введите ваш вопрос...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 12.0,
+                      ),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: _isLoading ? null : _sendMessage,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.deepPurple,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.all(16),
+                  ),
+                  tooltip: 'Отправить',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
